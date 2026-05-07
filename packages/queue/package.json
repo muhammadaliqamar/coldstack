@@ -1,0 +1,16 @@
+{
+  "name": "@coldstack/queue",
+  "version": "1.0.0",
+  "private": true,
+  "main": "index.ts",
+  "scripts": {
+    "build": "tsc"
+  },
+  "dependencies": {
+    "bullmq": "^5.1.6",
+    "ioredis": "^5.3.2"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.3"
+  }
+}

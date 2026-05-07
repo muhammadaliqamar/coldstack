@@ -1,0 +1,437 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── ENUMS ──────────────────────────────────────────────
+
+enum WarmupStatus {
+  idle
+  warming
+  ready
+  paused
+}
+
+enum SeedProvider {
+  gmail
+  outlook
+  custom
+}
+
+enum SeedType {
+  seed
+  real
+}
+
+enum ContactStatus {
+  new_contact
+  contacted
+  replied
+  bounced
+  unsubscribed
+  converted
+}
+
+enum CampaignStatus {
+  draft
+  scheduled
+  running
+  paused
+  completed
+}
+
+enum SequenceCondition {
+  always
+  not_opened
+  not_replied
+  opened_not_replied
+}
+
+enum LeadStage {
+  new_lead
+  contacted
+  opened
+  clicked
+  replied
+  interested
+  demo_scheduled
+  converted
+  lost
+  unsubscribed
+}
+
+enum EmailLogStatus {
+  sent
+  delivered
+  opened
+  clicked
+  replied
+  bounced
+  failed
+}
+
+enum TeamRole {
+  admin
+  member
+}
+
+// ─── MODELS ─────────────────────────────────────────────
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  domains      Domain[]
+  campaigns    Campaign[]
+  emailLists   EmailList[]
+  assignedLeads Lead[]    @relation("AssignedLeads")
+  teamMembers  TeamMember[]
+  apiKeys      ApiKey[]
+  notifications NotificationSetting?
+  emailTemplates EmailTemplate[]
+  seedAccounts SeedAccount[]
+
+  @@map("users")
+}
+
+model Domain {
+  id         String   @id @default(cuid())
+  userId     String
+  domainName String
+  smtpHost   String
+  smtpPort   Int      @default(587)
+  smtpUser   String
+  smtpPass   String   // encrypted at rest (AES-256)
+  imapHost   String?
+  imapPort   Int      @default(993)
+  imapUser   String?
+  imapPass   String?  // encrypted at rest (AES-256)
+  verified   Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  inboxes Inbox[]
+
+  @@map("domains")
+}
+
+model Inbox {
+  id             String       @id @default(cuid())
+  domainId       String
+  emailAddress   String       @unique
+  fromName       String?      // Display name shown to recipients (e.g. "Kamran Ali")
+  smtpHost       String
+  smtpPort       Int          @default(587)
+  smtpUser       String
+  smtpPass       String       // encrypted at rest (AES-256)
+  imapHost       String?
+  imapPort       Int          @default(993)
+  imapUser       String?
+  imapPass       String?      // encrypted at rest (AES-256)
+  warmupStatus   WarmupStatus @default(idle)
+  warmupScore    Int          @default(0)
+  warmupWeek     Int          @default(0)  // Current warmup week (1-6)
+  weekApproved   Boolean      @default(false) // User must approve each new week
+  dailySendLimit Int          @default(5)
+  totalSent      Int          @default(0)
+  totalBounced   Int          @default(0)
+  totalReplied   Int          @default(0)
+  createdAt      DateTime     @default(now())
+  lastUsedAt     DateTime?
+  updatedAt      DateTime     @updatedAt
+
+  domain               Domain                @relation(fields: [domainId], references: [id], onDelete: Cascade)
+  warmupLogs           WarmupLog[]
+  leads                Lead[]
+  emailLogs            EmailLog[]
+  campaignInboxes      CampaignInbox[]
+  deliverabilityChecks DeliverabilityCheck[]
+
+  @@map("inboxes")
+}
+
+model SeedAccount {
+  id         String       @id @default(cuid())
+  userId     String
+  email      String       @unique
+  provider   SeedProvider @default(gmail)
+  type       SeedType     @default(seed)
+  smtpHost   String
+  smtpPort   Int          @default(587)
+  smtpUser   String
+  smtpPass   String       // encrypted at rest
+  imapHost   String?
+  imapPort   Int          @default(993)
+  imapUser   String?
+  imapPass   String?      // encrypted at rest
+  isActive   Boolean      @default(true)
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+
+  user       User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("seed_accounts")
+}
+
+model DeliverabilityCheck {
+  id               String   @id @default(cuid())
+  inboxId          String
+  week             Int
+  date             DateTime @default(now())
+  spamScore        Float?   // mail-tester score (0-10)
+  blacklisted      Boolean  @default(false)
+  blacklistDetails String?  // JSON of which lists flagged
+  bounceRate       Float?
+  replyRate        Float?
+  warmupScore      Int?
+  status           String   @default("pending") // pending, passed, failed, action_needed
+  notes            String?  // auto-generated guidance text
+
+  inbox Inbox @relation(fields: [inboxId], references: [id], onDelete: Cascade)
+
+  @@map("deliverability_checks")
+}
+
+model WarmupLog {
+  id             String   @id @default(cuid())
+  inboxId        String
+  date           DateTime @default(now())
+  emailsSent     Int      @default(0)
+  emailsReceived Int      @default(0)
+  openRate       Float    @default(0)
+  replyRate      Float    @default(0)
+
+  inbox Inbox @relation(fields: [inboxId], references: [id], onDelete: Cascade)
+
+  @@map("warmup_logs")
+}
+
+model EmailList {
+  id            String   @id @default(cuid())
+  userId        String
+  name          String
+  fileName      String
+  totalContacts Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  contacts Contact[]
+  campaigns Campaign[]
+
+  @@map("email_lists")
+}
+
+model Contact {
+  id           String        @id @default(cuid())
+  listId       String
+  email        String
+  firstName    String?
+  lastName     String?
+  company      String?
+  title        String?
+  phone        String?
+  status       ContactStatus @default(new_contact)
+  customFields Json?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  list  EmailList @relation(fields: [listId], references: [id], onDelete: Cascade)
+  leads Lead[]
+
+  @@unique([listId, email])
+  @@map("contacts")
+}
+
+model Campaign {
+  id            String         @id @default(cuid())
+  userId        String
+  name          String
+  description   String?
+  status        CampaignStatus @default(draft)
+  emailListId   String?
+  scheduleStart DateTime?
+  scheduleEnd   DateTime?
+  dailyLimit    Int            @default(50)
+  timezone      String         @default("UTC")
+  trackOpens    Boolean        @default(true)
+  trackClicks   Boolean        @default(true)
+  unsubFooter   String         @default("If you wish to unsubscribe, click here.")
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  emailList       EmailList?      @relation(fields: [emailListId], references: [id], onDelete: SetNull)
+  sequences       Sequence[]
+  leads           Lead[]
+  campaignInboxes CampaignInbox[]
+
+  @@map("campaigns")
+}
+
+model CampaignInbox {
+  id         String @id @default(cuid())
+  campaignId String
+  inboxId    String
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  inbox    Inbox    @relation(fields: [inboxId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignId, inboxId])
+  @@map("campaign_inboxes")
+}
+
+model Sequence {
+  id         String            @id @default(cuid())
+  campaignId String
+  stepNumber Int
+  subject    String
+  bodyHtml   String
+  bodyText   String?
+  delayDays  Int               @default(0)
+  condition  SequenceCondition @default(always)
+  createdAt  DateTime          @default(now())
+  updatedAt  DateTime          @updatedAt
+
+  campaign  Campaign   @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  emailLogs EmailLog[]
+
+  @@unique([campaignId, stepNumber])
+  @@map("sequences")
+}
+
+model Lead {
+  id              String    @id @default(cuid())
+  campaignId      String
+  contactId       String
+  inboxId         String?
+  stage           LeadStage @default(new_lead)
+  lastContactedAt DateTime?
+  nextFollowUpAt  DateTime?
+  notes           String?
+  customData      Json?
+  assignedTo      String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  campaign  Campaign   @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  contact   Contact    @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  inbox     Inbox?     @relation(fields: [inboxId], references: [id], onDelete: SetNull)
+  assignee  User?      @relation("AssignedLeads", fields: [assignedTo], references: [id], onDelete: SetNull)
+  emailLogs EmailLog[]
+  leadNotes LeadNote[]
+
+  @@unique([campaignId, contactId])
+  @@map("leads")
+}
+
+model LeadNote {
+  id        String   @id @default(cuid())
+  leadId    String
+  content   String
+  createdAt DateTime @default(now())
+
+  lead Lead @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@map("lead_notes")
+}
+
+model EmailLog {
+  id         String         @id @default(cuid())
+  leadId     String
+  inboxId    String
+  sequenceId String
+  messageId  String?        // SMTP message ID
+  sentAt     DateTime?
+  openedAt   DateTime?
+  clickedAt  DateTime?
+  repliedAt  DateTime?
+  bouncedAt  DateTime?
+  status     EmailLogStatus @default(sent)
+  subject    String?
+  preview    String?
+  createdAt  DateTime       @default(now())
+
+  lead     Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  inbox    Inbox    @relation(fields: [inboxId], references: [id], onDelete: Cascade)
+  sequence Sequence @relation(fields: [sequenceId], references: [id], onDelete: Cascade)
+
+  @@map("email_logs")
+}
+
+model WebhookEvent {
+  id          String    @id @default(cuid())
+  type        String
+  payload     Json
+  processedAt DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@map("webhook_events")
+}
+
+model TeamMember {
+  id        String   @id @default(cuid())
+  userId    String
+  email     String
+  name      String
+  role      TeamRole @default(member)
+  invitedAt DateTime @default(now())
+  joinedAt  DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("team_members")
+}
+
+model ApiKey {
+  id        String    @id @default(cuid())
+  userId    String
+  name      String
+  key       String    @unique
+  lastUsed  DateTime?
+  createdAt DateTime  @default(now())
+  revokedAt DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("api_keys")
+}
+
+model NotificationSetting {
+  id                 String  @id @default(cuid())
+  userId             String  @unique
+  onReply            Boolean @default(true)
+  onBounce           Boolean @default(true)
+  onCampaignComplete Boolean @default(true)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("notification_settings")
+}
+
+model EmailTemplate {
+  id          String   @id @default(cuid())
+  userId      String
+  name        String
+  subject     String
+  bodyHtml    String
+  bodyText    String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("email_templates")
+}
