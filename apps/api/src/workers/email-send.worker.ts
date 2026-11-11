@@ -10,16 +10,44 @@ const TRACKING_DOMAIN = process.env.TRACKING_DOMAIN || 'http://localhost:4000';
 export const emailSendWorker = createWorker(
   QUEUE_NAMES.EMAIL_SEND,
   async (job) => {
-    const { leadId, sequenceId, inboxId } = job.data as EmailSendJobData;
+    const { leadId, sequenceId, inboxId, subjectOverride, funnelStepId } = job.data as any;
 
-    const [lead, sequence, inbox] = await Promise.all([
+    const [lead, inbox] = await Promise.all([
       prisma.lead.findUnique({ where: { id: leadId }, include: { contact: true, campaign: true } }),
-      prisma.sequence.findUnique({ where: { id: sequenceId } }),
       prisma.inbox.findUnique({ where: { id: inboxId } }),
     ]);
 
-    if (!lead || !sequence || !inbox) {
-      console.error(`[EmailSend] Missing data: lead=${!!lead} seq=${!!sequence} inbox=${!!inbox}`);
+    if (!lead || !inbox) {
+      console.error(`[EmailSend] Missing data: lead=${!!lead} inbox=${!!inbox}`);
+      return;
+    }
+
+    let sequence = null;
+    let funnelStep = null;
+    let subject = '';
+    let html = '';
+    let bodyText = '';
+
+    if (funnelStepId) {
+      funnelStep = await prisma.funnelStep.findUnique({ where: { id: funnelStepId } });
+      if (!funnelStep) {
+        console.error(`[EmailSend] FunnelStep ${funnelStepId} not found`);
+        return;
+      }
+      subject = funnelStep.subject;
+      html = funnelStep.bodyHtml;
+      bodyText = funnelStep.bodyText || '';
+    } else if (sequenceId) {
+      sequence = await prisma.sequence.findUnique({ where: { id: sequenceId } });
+      if (!sequence) {
+        console.error(`[EmailSend] Sequence ${sequenceId} not found`);
+        return;
+      }
+      subject = subjectOverride || sequence.subject;
+      html = sequence.bodyHtml;
+      bodyText = sequence.bodyText || '';
+    } else {
+      console.error(`[EmailSend] Neither sequenceId nor funnelStepId provided`);
       return;
     }
 
@@ -32,9 +60,11 @@ export const emailSendWorker = createWorker(
       throw new Error('Daily send limit reached, will retry');
     }
 
+    const placeholderSeqId = sequenceId || (await prisma.sequence.findFirst({ where: { campaignId: lead.campaignId } }))?.id || '';
+
     // Create email log first
     const emailLog = await prisma.emailLog.create({
-      data: { leadId, inboxId, sequenceId, status: 'sent', subject: sequence.subject, preview: sequence.bodyText?.substring(0, 100) },
+      data: { leadId, inboxId, sequenceId: placeholderSeqId, status: 'sent', subject, preview: bodyText.substring(0, 100) },
     });
 
     // Personalize content
@@ -46,8 +76,8 @@ export const emailSendWorker = createWorker(
       email: lead.contact.email,
     };
 
-    let html = personalizeContent(sequence.bodyHtml, personData);
-    const subject = personalizeContent(sequence.subject, personData);
+    html = personalizeContent(html, personData);
+    const personalizedSubject = personalizeContent(subject, personData);
 
     // Inject click tracking
     if (lead.campaign.trackClicks) {
@@ -63,9 +93,9 @@ export const emailSendWorker = createWorker(
     try {
       const result = await sendEmail(inbox, {
         to: lead.contact.email,
-        subject,
+        subject: personalizedSubject,
         html,
-        text: sequence.bodyText ? personalizeContent(sequence.bodyText, personData) : undefined,
+        text: bodyText ? personalizeContent(bodyText, personData) : undefined,
         trackingPixel,
       });
 
@@ -75,25 +105,35 @@ export const emailSendWorker = createWorker(
       });
 
       // Update lead
-      const nextSeq = await prisma.sequence.findFirst({
-        where: { campaignId: lead.campaignId, stepNumber: sequence.stepNumber + 1 },
-      });
+      if (funnelStepId) {
+        await prisma.lead.update({
+          where: { id: leadId },
+          data: {
+            stage: lead.stage === 'new_lead' ? 'contacted' : undefined,
+            lastContactedAt: new Date(),
+          },
+        });
+      } else {
+        const nextSeq = await prisma.sequence.findFirst({
+          where: { campaignId: lead.campaignId, stepNumber: sequence!.stepNumber + 1 },
+        });
 
-      await prisma.lead.update({
-        where: { id: leadId },
-        data: {
-          stage: lead.stage === 'new_lead' ? 'contacted' : undefined,
-          lastContactedAt: new Date(),
-          nextFollowUpAt: nextSeq ? new Date(Date.now() + nextSeq.delayDays * 86400000) : null,
-        },
-      });
+        await prisma.lead.update({
+          where: { id: leadId },
+          data: {
+            stage: lead.stage === 'new_lead' ? 'contacted' : undefined,
+            lastContactedAt: new Date(),
+            nextFollowUpAt: nextSeq ? new Date(Date.now() + nextSeq.delayDays * 86400000) : null,
+          },
+        });
+      }
 
       await prisma.inbox.update({
         where: { id: inboxId },
         data: { totalSent: { increment: 1 }, lastUsedAt: new Date() },
       });
 
-      console.log(`[EmailSend] Sent to ${lead.contact.email} (step ${sequence.stepNumber})`);
+      console.log(`[EmailSend] Sent to ${lead.contact.email} (funnelStep=${!!funnelStepId})`);
     } catch (err: any) {
       await prisma.emailLog.update({
         where: { id: emailLog.id },

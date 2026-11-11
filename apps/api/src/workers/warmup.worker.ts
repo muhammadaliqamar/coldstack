@@ -41,18 +41,20 @@ export const warmupWorker = createWorker(
 
       try {
         const warmupEmail = await getGeminiWarmupEmail();
-        await sendEmail(inbox, {
+        const { messageId } = await sendEmail(inbox, {
           to: recipientEmail,
           subject: warmupEmail.subject,
           html: `<p>${warmupEmail.body}</p>`,
         });
 
-        // Enqueue Auto-Read simulation for 30 min - 1.5 hours later
-        const readDelay = Math.random() * (5400000 - 1800000) + 1800000;
+        // Enqueue Auto-Read simulation for 2-8 minutes later
+        const readDelay = Math.random() * (480000 - 120000) + 120000;
         await autoReadWarmupQueue.add('auto-read', {
           recipientEmail,
           senderEmail: inbox.emailAddress,
           subject: warmupEmail.subject,
+          messageId,
+          originalBody: warmupEmail.body
         }, { delay: readDelay });
 
         // Update database immediately
@@ -66,6 +68,10 @@ export const warmupWorker = createWorker(
             emailsReceived: 0,
             openRate: 0.85 + Math.random() * 0.15,
             replyRate,
+            recipientEmail,
+            subject: warmupEmail.subject,
+            messageId,
+            status: 'sent',
           },
         });
 
@@ -149,12 +155,22 @@ export const warmupWorker = createWorker(
     const isWeekend = now.getUTCDay() === 0 || now.getUTCDay() === 6;
 
     // ── Calculate Week ───────────────────────────────────
-    const warmupLogCount = await prisma.warmupLog.count({ where: { inboxId } });
-    const daysWarming = warmupLogCount;
+    const logs = await prisma.warmupLog.findMany({
+      where: { inboxId },
+      select: { date: true },
+    });
+    const uniqueDays = new Set(logs.map(log => log.date.toISOString().slice(0, 10)));
+    const daysWarming = uniqueDays.size;
     const calculatedWeek = Math.min(Math.floor(daysWarming / 7) + 1, 6);
 
     if (calculatedWeek > inbox.warmupWeek) {
-      if (!inbox.weekApproved) {
+      // Auto-approve the very first week (0 → 1 transition)
+      if (inbox.warmupWeek === 0) {
+        await prisma.inbox.update({
+          where: { id: inboxId },
+          data: { warmupWeek: 1, weekApproved: true },
+        });
+      } else if (!inbox.weekApproved) {
         console.log(`[Warmup] Week ${calculatedWeek} requires user approval for inbox ${inboxId} — pausing`);
         
         const repeatableJobs = await warmupQueue.getRepeatableJobs();
@@ -169,12 +185,12 @@ export const warmupWorker = createWorker(
           data: { warmupStatus: 'paused' },
         });
         return;
+      } else {
+        await prisma.inbox.update({
+          where: { id: inboxId },
+          data: { warmupWeek: calculatedWeek, weekApproved: false },
+        });
       }
-
-      await prisma.inbox.update({
-        where: { id: inboxId },
-        data: { warmupWeek: calculatedWeek, weekApproved: false },
-      });
     }
 
     const weekConfig = WEEK_SCHEDULE[(calculatedWeek - 1)] || WEEK_SCHEDULE[5];
@@ -188,6 +204,19 @@ export const warmupWorker = createWorker(
     if (!isWeekend && dailyLimit > previousLimit + 5) {
       dailyLimit = previousLimit + 5;
     }
+
+    const todayStart = new Date();
+    todayStart.setUTCHours(0, 0, 0, 0);
+    const todayLogsCount = await prisma.warmupLog.count({
+      where: { inboxId, date: { gte: todayStart } }
+    });
+
+    if (todayLogsCount >= dailyLimit) {
+      console.log(`[Warmup] Inbox ${inboxId} already reached daily limit of ${dailyLimit} today`);
+      return;
+    }
+    
+    const remainingForToday = dailyLimit - todayLogsCount;
 
     // ── Gather Recipients ────────────────────────────────
     const internalInboxes = await prisma.inbox.findMany({
@@ -223,7 +252,7 @@ export const warmupWorker = createWorker(
     }
 
     recipientsToSend.sort(() => 0.5 - Math.random());
-    const finalRecipients = recipientsToSend.slice(0, dailyLimit);
+    const finalRecipients = recipientsToSend.slice(0, remainingForToday);
 
     if (finalRecipients.length === 0) {
       console.log(`[Warmup] No recipients available for inbox ${inboxId}`);
@@ -237,23 +266,28 @@ export const warmupWorker = createWorker(
     });
 
     // ── Enqueue Individual Email Jobs ───────────────────
-    // Spread the emails over several minutes/hours to avoid bulk sending
+    // Spread the emails over max 30 minutes total to complete each day's batch quickly
+    const MAX_SPREAD_MS = 30 * 60 * 1000; // 30 minutes
     let accumulatedDelay = 0;
+    const todayDateStr = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
     
     for (let i = 0; i < finalRecipients.length; i++) {
       const recipient = finalRecipients[i];
-      // First email sends immediately (0 delay)
-      // Subsequent emails have a random delay added
-      const delay = i === 0 ? 0 : Math.random() * (120000 - 30000) + 30000;
+      // First email sends immediately; rest spread evenly within 30 min
+      const maxPerEmailDelay = finalRecipients.length > 1 ? Math.floor(MAX_SPREAD_MS / (finalRecipients.length - 1)) : 0;
+      const delay = i === 0 ? 0 : Math.floor(Math.random() * maxPerEmailDelay * 0.6 + maxPerEmailDelay * 0.2);
       accumulatedDelay += delay;
       
+      // Start index from todayLogsCount to avoid using job IDs of already-sent emails
+      const jobIndex = todayLogsCount + i;
+      const jobId = `warmup-send-${inbox.id}-${todayDateStr}-${jobIndex}`;
       await warmupQueue.add('warmup-email-send', {
         inboxId: inbox.id,
         recipientEmail: recipient.email,
         isLastForDay: i === finalRecipients.length - 1,
         calculatedWeek,
         weekConfig,
-      }, { delay: accumulatedDelay }); 
+      }, { delay: accumulatedDelay, jobId }); 
     }
 
     console.log(`[Warmup] Inbox ${inboxId}: Enqueued ${finalRecipients.length} individual emails for Week ${calculatedWeek}`);

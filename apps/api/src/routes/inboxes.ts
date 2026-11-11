@@ -45,20 +45,128 @@ router.get('/', async (req: AuthRequest, res, next) => {
         _count: {
           select: { emailLogs: true },
         },
+        warmupLogs: {
+          select: { date: true },
+        },
       },
       orderBy: { createdAt: 'desc' },
     });
 
     res.json(
-      inboxes.map((i: any) => ({
-        ...i,
-        smtpPass: '***',
-        domainName: i.domain.domainName,
-      }))
+      inboxes.map((i: any) => {
+        const uniqueDays = new Set(i.warmupLogs.map((log: any) => log.date.toISOString().slice(0, 10)));
+        const todayStr = new Date().toISOString().slice(0, 10);
+        const sentToday = uniqueDays.has(todayStr);
+        const currentDay = i.warmupStatus === 'idle' ? 0 : (uniqueDays.size + (sentToday ? 0 : 1));
+
+        return {
+          ...i,
+          smtpPass: '***',
+          domainName: i.domain.domainName,
+          currentDay,
+          warmupLogs: undefined, // remove raw logs from the response payload
+        };
+      })
     );
   } catch (error) {
     next(error);
   }
+});
+
+// ─── Bulk Warmup Controls ─────────────────────────────────
+
+/**
+ * POST /api/inboxes/bulk/pause-warmup — Pause warmup for ALL inboxes
+ */
+router.post('/bulk/pause-warmup', async (req: AuthRequest, res, next) => {
+  try {
+    const inboxes = await prisma.inbox.findMany({
+      where: { domain: { userId: req.userId! }, warmupStatus: 'warming' },
+    });
+
+    for (const inbox of inboxes) {
+      const repeatableJobs = await warmupQueue.getRepeatableJobs();
+      for (const job of repeatableJobs) {
+        if (job.name === `warmup-${inbox.id}`) {
+          await warmupQueue.removeRepeatableByKey(job.key);
+        }
+      }
+      await prisma.inbox.update({
+        where: { id: inbox.id },
+        data: { warmupStatus: 'paused' },
+      });
+    }
+
+    res.json({ message: `Paused warmup for ${inboxes.length} inboxes`, count: inboxes.length });
+  } catch (error) { next(error); }
+});
+
+/**
+ * POST /api/inboxes/bulk/resume-warmup — Resume warmup for ALL paused inboxes
+ */
+router.post('/bulk/resume-warmup', async (req: AuthRequest, res, next) => {
+  try {
+    const WEEK_LIMITS = [2, 5, 10, 20, 30, 30];
+    const inboxes = await prisma.inbox.findMany({
+      where: { domain: { userId: req.userId! }, warmupStatus: 'paused' },
+    });
+
+    for (const inbox of inboxes) {
+      const currentWeek = Math.max(inbox.warmupWeek, 1);
+      const policyLimit = WEEK_LIMITS[currentWeek - 1] || 2;
+
+      await prisma.inbox.update({
+        where: { id: inbox.id },
+        data: { warmupStatus: 'warming', weekApproved: true, dailySendLimit: policyLimit },
+      });
+
+      await warmupQueue.add(`warmup-${inbox.id}-immediate`, { inboxId: inbox.id });
+      await warmupQueue.add(`warmup-${inbox.id}`, { inboxId: inbox.id }, {
+        repeat: { pattern: '0 9 * * *' },
+      });
+    }
+
+    res.json({ message: `Resumed warmup for ${inboxes.length} inboxes`, count: inboxes.length });
+  } catch (error) { next(error); }
+});
+
+/**
+ * POST /api/inboxes/bulk/stop-warmup — Stop and reset warmup for ALL inboxes
+ */
+router.post('/bulk/stop-warmup', async (req: AuthRequest, res, next) => {
+  try {
+    const inboxes = await prisma.inbox.findMany({
+      where: { domain: { userId: req.userId! }, warmupStatus: { in: ['warming', 'paused'] } },
+    });
+
+    for (const inbox of inboxes) {
+      const repeatableJobs = await warmupQueue.getRepeatableJobs();
+      for (const job of repeatableJobs) {
+        if (job.name === `warmup-${inbox.id}`) {
+          await warmupQueue.removeRepeatableByKey(job.key);
+        }
+      }
+
+      await prisma.inbox.update({
+        where: { id: inbox.id },
+        data: {
+          warmupStatus: 'idle',
+          warmupScore: 0,
+          warmupWeek: 0,
+          weekApproved: false,
+          dailySendLimit: 2,
+          totalSent: 0,
+          totalBounced: 0,
+          totalReplied: 0,
+          totalSpam: 0,
+        },
+      });
+
+      await prisma.warmupLog.deleteMany({ where: { inboxId: inbox.id } });
+    }
+
+    res.json({ message: `Stopped and reset warmup for ${inboxes.length} inboxes`, count: inboxes.length });
+  } catch (error) { next(error); }
 });
 
 /**
@@ -148,9 +256,18 @@ router.post('/:id/start-warmup', async (req: AuthRequest, res, next) => {
       return res.status(400).json({ error: 'Warmup is already running' });
     }
 
+    const startingWeek = inbox.warmupWeek === 0 ? 1 : inbox.warmupWeek;
+    const WEEK_LIMITS = [2, 5, 10, 20, 30, 30];
+    const policyLimit = WEEK_LIMITS[startingWeek - 1] || 2;
+
     await prisma.inbox.update({
       where: { id: inbox.id },
-      data: { warmupStatus: 'warming' },
+      data: { 
+        warmupStatus: 'warming',
+        warmupWeek: startingWeek,
+        weekApproved: true,
+        dailySendLimit: policyLimit,
+      },
     });
 
     await warmupQueue.add(`warmup-${inbox.id}-immediate`, { inboxId: inbox.id });
@@ -161,6 +278,49 @@ router.post('/:id/start-warmup', async (req: AuthRequest, res, next) => {
     });
 
     res.json({ message: 'Warmup started', status: 'warming' });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * POST /api/inboxes/:id/resume-warmup — Alias for start-warmup
+ */
+router.post('/:id/resume-warmup', async (req: AuthRequest, res, next) => {
+  try {
+    const inbox = await prisma.inbox.findFirst({
+      where: { id: req.params.id, domain: { userId: req.userId! } },
+    });
+
+    if (!inbox) {
+      return res.status(404).json({ error: 'Inbox not found' });
+    }
+
+    if (inbox.warmupStatus === 'warming') {
+      return res.status(400).json({ error: 'Warmup is already running' });
+    }
+
+    const WEEK_LIMITS = [2, 5, 10, 20, 30, 30];
+    const currentWeek = Math.max(inbox.warmupWeek, 1);
+    const policyLimit = WEEK_LIMITS[currentWeek - 1] || 2;
+
+    await prisma.inbox.update({
+      where: { id: inbox.id },
+      data: { 
+        warmupStatus: 'warming',
+        weekApproved: true,
+        dailySendLimit: policyLimit,
+      },
+    });
+
+    await warmupQueue.add(`warmup-${inbox.id}-immediate`, { inboxId: inbox.id });
+    await warmupQueue.add(`warmup-${inbox.id}`, { inboxId: inbox.id }, {
+      repeat: {
+        pattern: '0 9 * * *',
+      },
+    });
+
+    res.json({ message: 'Warmup resumed', status: 'warming' });
   } catch (error) {
     next(error);
   }
@@ -199,6 +359,52 @@ router.post('/:id/pause-warmup', async (req: AuthRequest, res, next) => {
 });
 
 /**
+ * POST /api/inboxes/:id/stop-warmup
+ */
+router.post('/:id/stop-warmup', async (req: AuthRequest, res, next) => {
+  try {
+    const inbox = await prisma.inbox.findFirst({
+      where: { id: req.params.id, domain: { userId: req.userId! } },
+    });
+
+    if (!inbox) {
+      return res.status(404).json({ error: 'Inbox not found' });
+    }
+
+    // Remove repeatable warmup job
+    const repeatableJobs = await warmupQueue.getRepeatableJobs();
+    for (const job of repeatableJobs) {
+      if (job.name === `warmup-${inbox.id}`) {
+        await warmupQueue.removeRepeatableByKey(job.key);
+      }
+    }
+
+    await prisma.inbox.update({
+      where: { id: inbox.id },
+      data: { 
+        warmupStatus: 'idle',
+        warmupScore: 0,
+        warmupWeek: 0,
+        weekApproved: false,
+        dailySendLimit: 2,
+        totalSent: 0,
+        totalBounced: 0,
+        totalReplied: 0
+      },
+    });
+    
+    // Optionally delete warmup logs so it starts completely fresh
+    await prisma.warmupLog.deleteMany({
+      where: { inboxId: inbox.id }
+    });
+
+    res.json({ message: 'Warmup stopped and reset', status: 'idle' });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
  * POST /api/inboxes/:id/approve-week — Approve warmup to proceed to next week
  */
 router.post('/:id/approve-week', async (req: AuthRequest, res, next) => {
@@ -220,12 +426,16 @@ router.post('/:id/approve-week', async (req: AuthRequest, res, next) => {
       return res.status(400).json({ error: 'Warmup already completed all 6 weeks' });
     }
 
+    const WEEK_LIMITS = [2, 5, 10, 20, 30, 30];
+    const policyLimit = WEEK_LIMITS[nextWeek - 1] || 30;
+
     await prisma.inbox.update({
       where: { id: inbox.id },
       data: {
         weekApproved: true,
         warmupWeek: nextWeek,
         warmupStatus: 'warming',
+        dailySendLimit: policyLimit,
       },
     });
 
@@ -241,6 +451,136 @@ router.post('/:id/approve-week', async (req: AuthRequest, res, next) => {
     await warmupQueue.add(`warmup-${inbox.id}-immediate`, { inboxId: inbox.id });
 
     res.json({ message: `Week ${nextWeek} approved — warmup continuing`, warmupWeek: nextWeek });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * GET /api/inboxes/:id/warmup-logs
+ */
+router.get('/:id/warmup-logs', async (req: AuthRequest, res, next) => {
+  try {
+    const inbox = await prisma.inbox.findFirst({
+      where: { id: req.params.id, domain: { userId: req.userId! } },
+    });
+
+    if (!inbox) {
+      return res.status(404).json({ error: 'Inbox not found' });
+    }
+
+    const logs = await prisma.warmupLog.findMany({
+      where: { inboxId: inbox.id },
+      orderBy: { date: 'desc' },
+      take: 50,
+    });
+
+    res.json(logs);
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * GET /api/inboxes/:id/warmup-policy — Full policy state for the inbox
+ */
+router.get('/:id/warmup-policy', async (req: AuthRequest, res, next) => {
+  try {
+    const inbox = await prisma.inbox.findFirst({
+      where: { id: req.params.id, domain: { userId: req.userId! } },
+      include: { domain: true },
+    });
+
+    if (!inbox) {
+      return res.status(404).json({ error: 'Inbox not found' });
+    }
+
+    const WEEK_SCHEDULE = [
+      { week: 1, goal: 'Establish sending pattern',     daily: 2,  internal: 2,  gmail: 0,  outlook: 0, real: 0, targetScore: 20  },
+      { week: 2, goal: 'Introduce external seed accounts', daily: 5,  internal: 3,  gmail: 2,  outlook: 0, real: 0, targetScore: 35  },
+      { week: 3, goal: 'Build momentum',                daily: 10, internal: 4,  gmail: 4,  outlook: 2, real: 0, targetScore: 50  },
+      { week: 4, goal: 'Approach ready zone',            daily: 20, internal: 6,  gmail: 8,  outlook: 4, real: 2, targetScore: 70  },
+      { week: 5, goal: 'Hit ready threshold',            daily: 30, internal: 8,  gmail: 12, outlook: 6, real: 4, targetScore: 85  },
+      { week: 6, goal: 'Full warmup complete',           daily: 30, internal: 10, gmail: 10, outlook: 6, real: 4, targetScore: 100 },
+    ];
+
+    const currentWeek = Math.max(inbox.warmupWeek, 1);
+    const weekConfig = WEEK_SCHEDULE[(currentWeek - 1)] || WEEK_SCHEDULE[5];
+
+    // Calculate unique calendar days of logs for currentDay
+    const logs = await prisma.warmupLog.findMany({
+      where: { inboxId: inbox.id },
+      select: { date: true },
+    });
+    const uniqueDays = new Set(logs.map(log => log.date.toISOString().slice(0, 10)));
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const sentToday = uniqueDays.has(todayStr);
+    const currentDay = inbox.warmupStatus === 'idle' ? 0 : (uniqueDays.size + (sentToday ? 0 : 1));
+
+    // Today's send count
+    const todayStart = new Date();
+    todayStart.setUTCHours(0, 0, 0, 0);
+    const todaySentCount = await prisma.warmupLog.count({
+      where: { inboxId: inbox.id, date: { gte: todayStart } },
+    });
+
+    // Bounce rate
+    const bounceRate = inbox.totalSent > 0 ? (inbox.totalBounced / inbox.totalSent) : 0;
+
+    // Safety rule checks
+    const now = new Date();
+    const isFridayPrayerTime = now.getUTCDay() === 5 && now.getUTCHours() >= 8 && now.getUTCHours() < 10;
+    const isWeekend = now.getUTCDay() === 0 || now.getUTCDay() === 6;
+
+    // Check for duplicate subjects this week
+    const weekStart = new Date();
+    weekStart.setUTCDate(weekStart.getUTCDate() - weekStart.getUTCDay());
+    weekStart.setUTCHours(0, 0, 0, 0);
+
+    // Seed account counts
+    const seeds = await prisma.seedAccount.findMany({
+      where: { userId: inbox.domain.userId, isActive: true },
+    });
+    const gmailSeedCount = seeds.filter(s => s.provider === 'gmail' && s.type === 'seed').length;
+    const outlookSeedCount = seeds.filter(s => s.provider === 'outlook' && s.type === 'seed').length;
+    const realContactCount = seeds.filter(s => s.type === 'real').length;
+    const internalInboxCount = await prisma.inbox.count({
+      where: { domain: { userId: inbox.domain.userId }, id: { not: inbox.id } },
+    });
+
+    // Outreach readiness
+    const outreachReady = inbox.warmupScore >= 80;
+    const fullyReady = inbox.warmupScore >= 85 && currentWeek >= 6;
+
+    res.json({
+      weekSchedule: WEEK_SCHEDULE,
+      currentWeek,
+      currentWeekConfig: weekConfig,
+      currentDay,
+      todaySentCount,
+      dailyLimit: inbox.dailySendLimit,
+      bounceRate: parseFloat((bounceRate * 100).toFixed(1)),
+      bounceRateOk: bounceRate < 0.02,
+      isFridayPrayerTime,
+      isWeekend,
+      outreachReady,
+      fullyReady,
+      warmupScore: inbox.warmupScore,
+      warmupStatus: inbox.warmupStatus,
+      seedCounts: {
+        internal: internalInboxCount,
+        gmail: gmailSeedCount,
+        outlook: outlookSeedCount,
+        real: realContactCount,
+      },
+      // Recommendations
+      recommendations: {
+        needsGmailSeeds: currentWeek >= 2 && gmailSeedCount < weekConfig.gmail,
+        needsOutlookSeeds: currentWeek >= 3 && outlookSeedCount < weekConfig.outlook,
+        needsRealContacts: currentWeek >= 4 && realContactCount < weekConfig.real,
+        needsMoreInboxes: internalInboxCount < 2,
+      },
+    });
   } catch (error) {
     next(error);
   }

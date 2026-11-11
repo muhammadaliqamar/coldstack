@@ -126,17 +126,76 @@ export async function sendEmail(
 
 // ─── Personalization ────────────────────────────────────
 
+function resolveSpintax(text: string): string {
+  let current = text;
+  const regex = /\{([^{}]+)\}/g;
+  while (regex.test(current)) {
+    current = current.replace(regex, (match, choices) => {
+      const parts = choices.split('|');
+      return parts[Math.floor(Math.random() * parts.length)];
+    });
+  }
+  return current;
+}
+
+function resolveConditionals(content: string, data: Record<string, any>): string {
+  let current = content;
+  const regex = /\{\{#if\s+(\w+)\}\}([\s\S]*?)(?:\{\{else\}\}([\s\S]*?))?\{\{\/if\}\}/g;
+  while (regex.test(current)) {
+    current = current.replace(regex, (match, key, trueBranch, falseBranch = '') => {
+      const val = data[key];
+      const isTrue = val && String(val).trim().length > 0;
+      return isTrue ? trueBranch : falseBranch;
+    });
+  }
+  return current;
+}
+
+function resolveMergeTags(content: string, data: Record<string, any>): string {
+  // Matches {{variable}} or {{variable|"fallback"}} or {{variable|'fallback'}}
+  return content.replace(/\{\{(\w+)(?:\s*\|\s*(['"])(.*?)\2)?\}\}/g, (match, key, quote, fallback) => {
+    const val = data[key];
+    if (val !== undefined && val !== null && String(val).trim().length > 0) {
+      return String(val);
+    }
+    if (fallback !== undefined) {
+      return fallback;
+    }
+    return match;
+  });
+}
+
 /**
  * Replace personalization tokens in email content.
- * Tokens: {{firstName}}, {{lastName}}, {{company}}, {{title}}, {{email}}
+ * Supports:
+ * - Block conditionals: {{#if company}}...{{else}}...{{/if}}
+ * - Merge tag fallbacks: {{firstName|"there"}}
+ * - Spintax: {Hey|Hi|Hello}
  */
 export function personalizeContent(
   content: string,
   data: Record<string, string | null | undefined>
 ): string {
-  return content.replace(/\{\{(\w+)\}\}/g, (match, key) => {
-    return data[key] || match;
-  });
+  if (!content) return '';
+  
+  // Normalize key names for flexible merge tag casing
+  const normalizedData: Record<string, any> = { ...data };
+  if (data.firstName) normalizedData.first_name = data.firstName;
+  if (data.first_name) normalizedData.firstName = data.first_name;
+  if (data.lastName) normalizedData.last_name = data.lastName;
+  if (data.last_name) normalizedData.lastName = data.last_name;
+  if (data.title) normalizedData.job_title = data.title;
+  if (data.job_title) normalizedData.title = data.job_title;
+
+  let result = content;
+  // 1. Conditionals
+  result = resolveConditionals(result, normalizedData);
+  // 2. Merge tags with fallbacks
+  result = resolveMergeTags(result, normalizedData);
+  // 3. Spintax
+  result = resolveSpintax(result);
+  
+  return result;
 }
 
 // ─── Link Tracking ──────────────────────────────────────

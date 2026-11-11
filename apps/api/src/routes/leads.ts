@@ -123,4 +123,95 @@ router.post('/:id/task', async (req: AuthRequest, res, next) => {
   } catch (error) { next(error); }
 });
 
+// GET /closer/negotiations — All leads in the AI closing/negotiation stage
+router.get('/closer/negotiations', async (req: AuthRequest, res, next) => {
+  try {
+    const leads = await prisma.lead.findMany({
+      where: {
+        campaign: { userId: req.userId! },
+        OR: [
+          { funnelStage: 'closed' },
+          { aiStatus: 'pending_approval' },
+        ],
+      },
+      include: {
+        contact: true,
+        campaign: { select: { name: true } },
+        inbox: { select: { emailAddress: true } },
+      },
+      orderBy: { updatedAt: 'desc' },
+    });
+    res.json(leads);
+  } catch (error) { next(error); }
+});
+
+// POST /:id/closer/approve — Approve and send the AI draft response
+router.post('/:id/closer/approve', async (req: AuthRequest, res, next) => {
+  try {
+    const lead = await prisma.lead.findFirst({
+      where: { id: req.params.id, campaign: { userId: req.userId! } },
+      include: { contact: true, inbox: true },
+    });
+
+    if (!lead || !lead.aiDraftReply || !lead.inbox) {
+      return res.status(400).json({ error: 'Lead, AI draft, or dispatch inbox missing' });
+    }
+
+    const { sendEmail } = await import('@coldstack/mailer');
+    
+    // Dispatch closing offer email
+    await sendEmail(lead.inbox, {
+      to: lead.contact.email,
+      subject: `Special Proposal: Let's finalize details`,
+      html: `<p>${lead.aiDraftReply.replace(/\n/g, '<br>')}</p>`,
+    });
+
+    // Create log
+    await prisma.emailLog.create({
+      data: {
+        leadId: lead.id,
+        inboxId: lead.inbox.id,
+        sequenceId: (await prisma.sequence.findFirst({ where: { campaignId: lead.campaignId } }))?.id || '',
+        status: 'delivered',
+        subject: `Special Proposal: Let's finalize details`,
+        preview: lead.aiDraftReply.substring(0, 100),
+      },
+    });
+
+    const updated = await prisma.lead.update({
+      where: { id: lead.id },
+      data: {
+        aiStatus: 'approved',
+        aiDraftReply: null,
+      },
+    });
+
+    res.json(updated);
+  } catch (error) { next(error); }
+});
+
+// POST /:id/closer/edit — Edit the AI draft reply
+router.post('/:id/closer/edit', async (req: AuthRequest, res, next) => {
+  try {
+    const lead = await prisma.lead.findFirst({
+      where: { id: req.params.id, campaign: { userId: req.userId! } },
+    });
+
+    if (!lead) return res.status(404).json({ error: 'Lead not found' });
+
+    const { draftText } = req.body;
+    if (!draftText) return res.status(400).json({ error: 'draftText is required' });
+
+    const updated = await prisma.lead.update({
+      where: { id: lead.id },
+      data: {
+        aiDraftReply: draftText,
+        aiStatus: 'pending_approval',
+      },
+    });
+
+    res.json(updated);
+  } catch (error) { next(error); }
+});
+
 export default router;

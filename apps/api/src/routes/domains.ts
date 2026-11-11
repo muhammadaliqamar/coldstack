@@ -192,6 +192,63 @@ router.post('/:id/verify', async (req: AuthRequest, res, next) => {
         where: { id: domain.id },
         data: { verified: true },
       });
+
+      // Automatically generate 3 inboxes (info@, sales@, contact@) since domain is verified
+      const existingInboxesCount = await prisma.inbox.count({
+        where: { domainId: domain.id },
+      });
+
+      if (existingInboxesCount < 3) {
+        const countToCreate = 3 - existingInboxesCount;
+        const prefixes = ['info', 'sales', 'contact'];
+        
+        // Find existing email addresses to prevent collisions
+        const existingEmails = await prisma.inbox.findMany({
+          where: { domainId: domain.id },
+          select: { emailAddress: true },
+        });
+        const existingSet = new Set(existingEmails.map(i => i.emailAddress.toLowerCase().trim()));
+
+        for (let i = 0; i < countToCreate; i++) {
+          let prefix = prefixes[i] || `outreach${i + 1}`;
+          let emailAddress = `${prefix}@${domain.domainName}`.toLowerCase().trim();
+          
+          let uniqueIndex = 1;
+          while (existingSet.has(emailAddress)) {
+            prefix = `outreach${uniqueIndex}`;
+            emailAddress = `${prefix}@${domain.domainName}`.toLowerCase().trim();
+            uniqueIndex++;
+          }
+          existingSet.add(emailAddress);
+
+          const fromName = prefix.charAt(0).toUpperCase() + prefix.slice(1);
+
+          const inbox = await prisma.inbox.create({
+            data: {
+              domainId: domain.id,
+              emailAddress,
+              fromName,
+              smtpHost: domain.smtpHost,
+              smtpPort: domain.smtpPort,
+              smtpUser: domain.smtpUser,
+              smtpPass: domain.smtpPass,
+              imapHost: domain.imapHost,
+              imapPort: domain.imapPort,
+              imapUser: domain.imapUser,
+              imapPass: domain.imapPass,
+              warmupWeek: 1,
+              weekApproved: true, // Auto-approved for week 1
+              warmupStatus: 'warming',
+            },
+          });
+
+          // Add to warmup repeatable Daily Job
+          await warmupQueue.add(`warmup-${inbox.id}`, { inboxId: inbox.id }, {
+            repeat: { pattern: '0 9 * * *' },
+          });
+        }
+        console.log(`[Domains] Automatically generated ${countToCreate} inboxes for verified domain: ${domain.domainName}`);
+      }
     }
 
     res.json({

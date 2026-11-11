@@ -142,7 +142,7 @@ export function RichTextEditor({
         <div className="flex-1" />
 
         <DropdownMenu>
-          <DropdownMenuTrigger asChild>
+          <DropdownMenuTrigger>
             <Button variant="outline" size="sm" type="button" className="h-8 gap-1.5 px-3 border-dashed">
               <Variable className="h-3.5 w-3.5 text-primary" />
               <span>Insert Variable</span>

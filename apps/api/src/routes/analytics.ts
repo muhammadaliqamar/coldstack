@@ -96,4 +96,85 @@ router.get('/funnel', async (req: AuthRequest, res, next) => {
   } catch (error) { next(error); }
 });
 
+// GET /warmup — Warmup-specific analytics with optional date filtering
+router.get('/warmup', async (req: AuthRequest, res, next) => {
+  try {
+    const { date } = req.query;
+
+    // Get all user's inboxes
+    const inboxes = await prisma.inbox.findMany({
+      where: { domain: { userId: req.userId! } },
+      select: { id: true, emailAddress: true, warmupScore: true, warmupStatus: true, warmupWeek: true, totalSent: true, totalBounced: true, totalReplied: true, totalSpam: true, dailySendLimit: true },
+    });
+
+    const inboxIds = inboxes.map(i => i.id);
+
+    // Build date filter
+    let dateFilter: any = {};
+    if (date && typeof date === 'string') {
+      const dayStart = new Date(date);
+      dayStart.setUTCHours(0, 0, 0, 0);
+      const dayEnd = new Date(date);
+      dayEnd.setUTCHours(23, 59, 59, 999);
+      dateFilter = { date: { gte: dayStart, lte: dayEnd } };
+    }
+
+    // Aggregate warmup logs per inbox
+    const inboxStats = await Promise.all(inboxes.map(async (inbox) => {
+      const where = { inboxId: inbox.id, ...dateFilter };
+      const [sent, replied, bounced] = await Promise.all([
+        prisma.warmupLog.count({ where: { ...where, status: 'sent' } }),
+        prisma.warmupLog.count({ where: { ...where, status: 'replied' } }),
+        prisma.warmupLog.count({ where: { ...where, status: { in: ['bounced'] } } }),
+      ]);
+      const totalForPeriod = await prisma.warmupLog.count({ where });
+
+      return {
+        ...inbox,
+        periodSent: sent,
+        periodReplied: replied,
+        periodBounced: bounced,
+        periodTotal: totalForPeriod,
+      };
+    }));
+
+    // Daily breakdown (last 30 days) — always returned for chart
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const dailyStats = await prisma.warmupLog.groupBy({
+      by: ['status'],
+      where: { inboxId: { in: inboxIds }, date: { gte: thirtyDaysAgo } },
+      _count: true,
+    });
+
+    // Per-day breakdown for chart
+    const rawLogs = await prisma.warmupLog.findMany({
+      where: { inboxId: { in: inboxIds }, date: { gte: thirtyDaysAgo } },
+      select: { date: true, status: true },
+      orderBy: { date: 'asc' },
+    });
+
+    // Group by date string
+    const dailyBreakdown: Record<string, { date: string; sent: number; replied: number; bounced: number }> = {};
+    for (const log of rawLogs) {
+      const d = log.date.toISOString().slice(0, 10);
+      if (!dailyBreakdown[d]) dailyBreakdown[d] = { date: d, sent: 0, replied: 0, bounced: 0 };
+      if (log.status === 'sent') dailyBreakdown[d].sent++;
+      else if (log.status === 'replied') dailyBreakdown[d].replied++;
+      else if (log.status === 'bounced') dailyBreakdown[d].bounced++;
+    }
+
+    // Overall totals
+    const totalSent = dailyStats.find(s => s.status === 'sent')?._count || 0;
+    const totalReplied = dailyStats.find(s => s.status === 'replied')?._count || 0;
+    const totalBounced = dailyStats.find(s => s.status === 'bounced')?._count || 0;
+
+    res.json({
+      inboxStats,
+      totals: { totalSent, totalReplied, totalBounced },
+      dailyBreakdown: Object.values(dailyBreakdown),
+      filterDate: date || null,
+    });
+  } catch (error) { next(error); }
+});
+
 export default router;

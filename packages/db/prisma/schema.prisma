@@ -82,6 +82,20 @@ enum TeamRole {
   member
 }
 
+enum VerificationStatus {
+  unverified
+  verified
+  invalid
+}
+
+enum FunnelStage {
+  campaign
+  tofu
+  mofu
+  bofu
+  closed
+}
+
 // ─── MODELS ─────────────────────────────────────────────
 
 model User {
@@ -144,10 +158,11 @@ model Inbox {
   warmupScore    Int          @default(0)
   warmupWeek     Int          @default(0)  // Current warmup week (1-6)
   weekApproved   Boolean      @default(false) // User must approve each new week
-  dailySendLimit Int          @default(5)
+  dailySendLimit Int          @default(2)
   totalSent      Int          @default(0)
   totalBounced   Int          @default(0)
   totalReplied   Int          @default(0)
+  totalSpam      Int          @default(0)
   createdAt      DateTime     @default(now())
   lastUsedAt     DateTime?
   updatedAt      DateTime     @updatedAt
@@ -212,6 +227,10 @@ model WarmupLog {
   emailsReceived Int      @default(0)
   openRate       Float    @default(0)
   replyRate      Float    @default(0)
+  recipientEmail String?
+  subject        String?
+  messageId      String?
+  status         String   @default("sent")
 
   inbox Inbox @relation(fields: [inboxId], references: [id], onDelete: Cascade)
 
@@ -235,18 +254,19 @@ model EmailList {
 }
 
 model Contact {
-  id           String        @id @default(cuid())
-  listId       String
-  email        String
-  firstName    String?
-  lastName     String?
-  company      String?
-  title        String?
-  phone        String?
-  status       ContactStatus @default(new_contact)
-  customFields Json?
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
+  id                 String             @id @default(cuid())
+  listId             String
+  email              String
+  firstName          String?
+  lastName           String?
+  company            String?
+  title              String?
+  phone              String?
+  status             ContactStatus      @default(new_contact)
+  verificationStatus VerificationStatus @default(unverified)
+  customFields       Json?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
 
   list  EmailList @relation(fields: [listId], references: [id], onDelete: Cascade)
   leads Lead[]
@@ -313,18 +333,22 @@ model Sequence {
 }
 
 model Lead {
-  id              String    @id @default(cuid())
+  id              String      @id @default(cuid())
   campaignId      String
   contactId       String
   inboxId         String?
-  stage           LeadStage @default(new_lead)
+  stage           LeadStage   @default(new_lead)
+  funnelStage     FunnelStage @default(campaign)
+  funnelStep      Int         @default(0)
+  aiStatus        String      @default("idle") // idle, pending_approval, approved
+  aiDraftReply    String?     @db.Text
   lastContactedAt DateTime?
   nextFollowUpAt  DateTime?
   notes           String?
   customData      Json?
   assignedTo      String?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
 
   campaign  Campaign   @relation(fields: [campaignId], references: [id], onDelete: Cascade)
   contact   Contact    @relation(fields: [contactId], references: [id], onDelete: Cascade)
@@ -434,4 +458,19 @@ model EmailTemplate {
   user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("email_templates")
+}
+
+model FunnelStep {
+  id        String      @id @default(cuid())
+  funnel    FunnelStage // tofu, mofu, bofu
+  step      Int         // 1 to 10
+  subject   String
+  bodyHtml  String      @db.Text
+  bodyText  String?     @db.Text
+  delayDays Int         @default(3) // delay between steps
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  @@unique([funnel, step])
+  @@map("funnel_steps")
 }

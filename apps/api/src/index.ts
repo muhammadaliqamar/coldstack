@@ -1,3 +1,7 @@
+import * as dotenv from 'dotenv';
+import path from 'path';
+dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
+
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -18,6 +22,8 @@ import trackingRoutes from './routes/tracking';
 import templatesRoutes from './routes/templates';
 import seedRoutes from './routes/seeds';
 import deliverabilityRoutes from './routes/deliverability';
+import leadFinderRoutes from './routes/lead-finder';
+import nurturingRoutes from './routes/nurturing';
 
 const app = express();
 const httpServer = createServer(app);
@@ -55,6 +61,8 @@ app.use('/api/analytics', analyticsRoutes);
 app.use('/api/templates', templatesRoutes);
 app.use('/api/seeds', seedRoutes);
 app.use('/api/deliverability', deliverabilityRoutes);
+app.use('/api/lead-finder', leadFinderRoutes);
+app.use('/api/nurturing', nurturingRoutes);
 
 // Tracking routes (no /api prefix — short URLs)
 app.use('/t', trackingRoutes);

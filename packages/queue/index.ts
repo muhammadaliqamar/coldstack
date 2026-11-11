@@ -92,6 +92,8 @@ export interface AutoReadJobData {
   recipientEmail: string;
   senderEmail: string;
   subject: string;
+  messageId?: string;
+  originalBody?: string;
 }
 
 export interface AutoReplyJobData {
@@ -99,6 +101,7 @@ export interface AutoReplyJobData {
   senderEmail: string;    // The original sender
   subject: string;
   messageId: string;      // Used for threading
+  originalBody?: string;
 }
 
 export interface CampaignScheduleJobData {

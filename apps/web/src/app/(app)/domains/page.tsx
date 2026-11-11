@@ -54,7 +54,7 @@ export default function DomainsPage() {
     mutationFn: (id: string) => fetchApi(`/domains/${id}/verify`, { method: 'POST' }),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['domains'] });
-      if (data.verified) toast.success('SMTP connection verified!');
+      if (data.verified) toast.success('SMTP connection verified! 3 outreach inboxes generated automatically!');
       else toast.error(`Verification failed: ${data.error}`);
     },
   });

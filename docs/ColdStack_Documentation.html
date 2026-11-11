@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>ColdStack — Technical Documentation v1.0.0</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Inter', sans-serif; color: #1a1a2e; line-height: 1.7; padding: 40px 60px; max-width: 900px; margin: 0 auto; }
+  @media print { body { padding: 20px 30px; } .page-break { page-break-before: always; } }
+  h1 { font-size: 2.4rem; font-weight: 800; color: #0f0f23; margin-bottom: 8px; }
+  h2 { font-size: 1.6rem; font-weight: 700; color: #16213e; margin-top: 40px; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 3px solid #e94560; }
+  h3 { font-size: 1.2rem; font-weight: 600; color: #1a1a2e; margin-top: 24px; margin-bottom: 8px; }
+  p { margin-bottom: 12px; font-size: 0.95rem; }
+  ul, ol { margin-left: 24px; margin-bottom: 12px; }
+  li { margin-bottom: 6px; font-size: 0.95rem; }
+  code { background: #f0f0f5; padding: 2px 6px; border-radius: 4px; font-size: 0.88rem; font-family: 'Courier New', monospace; }
+  pre { background: #1a1a2e; color: #e0e0e0; padding: 16px 20px; border-radius: 8px; margin: 12px 0 20px; overflow-x: auto; font-size: 0.85rem; line-height: 1.5; }
+  pre code { background: none; padding: 0; color: inherit; }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0 20px; font-size: 0.9rem; }
+  th { background: #16213e; color: white; padding: 10px 14px; text-align: left; font-weight: 600; }
+  td { padding: 8px 14px; border-bottom: 1px solid #e0e0e5; }
+  tr:nth-child(even) { background: #f8f8fc; }
+  .cover { text-align: center; padding: 120px 0 80px; }
+  .cover .subtitle { font-size: 1.2rem; color: #555; font-weight: 400; margin-bottom: 30px; }
+  .cover .version { display: inline-block; background: #e94560; color: white; padding: 6px 20px; border-radius: 20px; font-weight: 600; font-size: 0.9rem; }
+  .cover .meta { margin-top: 40px; font-size: 0.85rem; color: #888; }
+  .badge { display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 0.78rem; font-weight: 600; }
+  .badge-green { background: #d4edda; color: #155724; }
+  .badge-blue { background: #cce5ff; color: #004085; }
+  .badge-orange { background: #fff3cd; color: #856404; }
+  .callout { background: #f0f4ff; border-left: 4px solid #4361ee; padding: 14px 18px; border-radius: 0 8px 8px 0; margin: 16px 0; }
+  .callout-warn { background: #fff8e6; border-left-color: #f59e0b; }
+  .toc a { text-decoration: none; color: #4361ee; display: block; padding: 4px 0; }
+  .toc a:hover { text-decoration: underline; }
+  .arch-box { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 16px 0; }
+  .arch-card { background: #f8f8fc; border: 1px solid #e0e0e5; border-radius: 8px; padding: 14px; }
+  .arch-card h4 { font-size: 0.95rem; margin-bottom: 6px; color: #16213e; }
+  .arch-card p { font-size: 0.85rem; margin: 0; color: #555; }
+</style>
+</head>
+<body>
+
+<!-- COVER PAGE -->
+<div class="cover">
+  <h1>ColdStack</h1>
+  <p class="subtitle">Open-Source Cold Email Infrastructure & Deliverability Platform</p>
+  <span class="version">v1.0.0 — Technical Documentation</span>
+  <p class="meta">Author: Muhammad Ali Qamar &bull; Date: May 2026<br>Repository: github.com/muhammadaliqamar/coldstack</p>
+</div>
+
+<div class="page-break"></div>
+
+<!-- TABLE OF CONTENTS -->
+<h2>Table of Contents</h2>
+<div class="toc">
+  <a href="#overview">1. System Overview</a>
+  <a href="#arch">2. Architecture & Tech Stack</a>
+  <a href="#setup">3. Installation & Setup</a>
+  <a href="#database">4. Database Schema</a>
+  <a href="#warmup">5. Warmup Engine (Core Feature)</a>
+  <a href="#api">6. API Reference</a>
+  <a href="#workers">7. Background Workers</a>
+  <a href="#ai">8. AI Integration (Google Gemini)</a>
+  <a href="#security">9. Security</a>
+  <a href="#env">10. Environment Variables</a>
+  <a href="#roadmap">11. Roadmap</a>
+</div>
+
+<div class="page-break"></div>
+
+<!-- 1. SYSTEM OVERVIEW -->
+<h2 id="overview">1. System Overview</h2>
+<p>ColdStack is a self-hostable, open-source alternative to SaaS platforms like Instantly, Lemlist, and Smartlead. It provides everything modern sales teams need to run high-volume cold email campaigns while protecting domain reputation through an intelligent, AI-powered warmup engine.</p>
+
+<h3>Core Capabilities</h3>
+<ul>
+  <li><strong>AI-Powered Warmup:</strong> Google Gemini generates realistic conversational emails that bypass spam filters.</li>
+  <li><strong>Deliverability Monitoring:</strong> Real-time tracking of bounce rates, reply rates, and inbox health scores.</li>
+  <li><strong>Smart IMAP Engagement:</strong> Automated reading, threading, and delayed replying to simulate genuine human interaction.</li>
+  <li><strong>Multi-Domain Management:</strong> Manage multiple domains, up to 3 inboxes per domain, and external seed accounts.</li>
+  <li><strong>Campaign Management:</strong> Multi-step sequences with conditional logic, open/click tracking, and lead pipeline.</li>
+  <li><strong>Crash-Safe Job Processing:</strong> BullMQ + Redis ensures no tasks are lost during server restarts.</li>
+</ul>
+
+<div class="page-break"></div>
+
+<!-- 2. ARCHITECTURE -->
+<h2 id="arch">2. Architecture & Tech Stack</h2>
+<p>ColdStack uses an npm workspace monorepo pattern to logically separate concerns:</p>
+<pre><code>coldstack/
+├── apps/
+│   ├── api/          # Express API server + BullMQ workers
+│   └── web/          # Next.js 14 dashboard
+├── packages/
+│   ├── db/           # Prisma ORM schema & client
+│   ├── mailer/       # Nodemailer (SMTP) + ImapFlow (IMAP)
+│   └── queue/        # BullMQ queue definitions
+├── docker-compose.yml
+└── package.json</code></pre>
+
+<h3>Technology Stack</h3>
+<table>
+  <tr><th>Layer</th><th>Technology</th></tr>
+  <tr><td>Frontend</td><td>Next.js 14, React Query, TailwindCSS, Base UI</td></tr>
+  <tr><td>Backend API</td><td>Node.js, Express, TypeScript</td></tr>
+  <tr><td>Database</td><td>PostgreSQL with Prisma ORM</td></tr>
+  <tr><td>Task Queues</td><td>Redis + BullMQ</td></tr>
+  <tr><td>Email (Send)</td><td>Nodemailer (SMTP)</td></tr>
+  <tr><td>Email (Read)</td><td>ImapFlow (IMAP)</td></tr>
+  <tr><td>AI</td><td>Google Gemini API</td></tr>
+  <tr><td>Encryption</td><td>AES-256 (credentials at rest)</td></tr>
+</table>
+
+<div class="page-break"></div>
+
+<!-- 3. INSTALLATION -->
+<h2 id="setup">3. Installation & Setup</h2>
+<h3>Prerequisites</h3>
+<ul>
+  <li>Node.js v18+ &bull; PostgreSQL &bull; Redis</li>
+</ul>
+<h3>Steps</h3>
+<pre><code># 1. Clone
+git clone https://github.com/muhammadaliqamar/coldstack.git
+cd coldstack
+
+# 2. Install dependencies
+npm install
+
+# 3. Configure environment
+cp .env.example .env
+# Edit .env with your DB, Redis, and Gemini API credentials
+
+# 4. Initialize database
+npm run db:push
+npm run db:seed
+
+# 5. Start everything (API + Web + Workers)
+npm run dev</code></pre>
+<p>The dashboard is available at <code>http://localhost:3000</code> and the API at <code>http://localhost:4000</code>.</p>
+
+<div class="page-break"></div>
+
+<!-- 4. DATABASE -->
+<h2 id="database">4. Database Schema</h2>
+<p>The Prisma schema defines the following core models:</p>
+<table>
+  <tr><th>Model</th><th>Purpose</th></tr>
+  <tr><td><code>User</code></td><td>Authentication & ownership of all resources</td></tr>
+  <tr><td><code>Domain</code></td><td>SMTP/IMAP domain configurations</td></tr>
+  <tr><td><code>Inbox</code></td><td>Individual email accounts with warmup state tracking</td></tr>
+  <tr><td><code>SeedAccount</code></td><td>External Gmail/Outlook seed accounts for cross-provider warmup</td></tr>
+  <tr><td><code>WarmupLog</code></td><td>Daily warmup metrics per inbox</td></tr>
+  <tr><td><code>DeliverabilityCheck</code></td><td>Weekly spam score and blacklist checks</td></tr>
+  <tr><td><code>Campaign</code></td><td>Outreach campaigns with scheduling and limits</td></tr>
+  <tr><td><code>Sequence</code></td><td>Multi-step email sequences within campaigns</td></tr>
+  <tr><td><code>EmailList / Contact</code></td><td>Imported contact lists and individual contacts</td></tr>
+  <tr><td><code>Lead</code></td><td>Campaign-contact associations with pipeline stages</td></tr>
+  <tr><td><code>EmailLog</code></td><td>Individual email delivery events (sent, opened, clicked, replied, bounced)</td></tr>
+</table>
+
+<h3>Key Inbox Fields</h3>
+<table>
+  <tr><th>Field</th><th>Type</th><th>Description</th></tr>
+  <tr><td><code>warmupStatus</code></td><td>Enum</td><td><code>idle</code> | <code>warming</code> | <code>paused</code> | <code>ready</code></td></tr>
+  <tr><td><code>warmupWeek</code></td><td>Int</td><td>Current warmup week (1–6)</td></tr>
+  <tr><td><code>weekApproved</code></td><td>Boolean</td><td>User must approve each new week</td></tr>
+  <tr><td><code>warmupScore</code></td><td>Int</td><td>Health score (0–100)</td></tr>
+  <tr><td><code>totalSent / totalBounced / totalReplied</code></td><td>Int</td><td>Cumulative lifetime counters</td></tr>
+</table>
+
+<div class="page-break"></div>
+
+<!-- 5. WARMUP ENGINE -->
+<h2 id="warmup">5. Warmup Engine (Core Feature)</h2>
+<p>The warmup engine is ColdStack's most critical subsystem. It gradually builds domain reputation over 6 weeks using AI-generated emails and simulated human engagement.</p>
+
+<h3>6-Week Schedule</h3>
+<table>
+  <tr><th>Week</th><th>Daily Volume</th><th>Internal</th><th>Gmail Seeds</th><th>Outlook Seeds</th><th>Real Seeds</th><th>Target Score</th></tr>
+  <tr><td>1</td><td>2</td><td>2</td><td>0</td><td>0</td><td>0</td><td>20</td></tr>
+  <tr><td>2</td><td>5</td><td>3</td><td>2</td><td>0</td><td>0</td><td>35</td></tr>
+  <tr><td>3</td><td>10</td><td>4</td><td>4</td><td>2</td><td>0</td><td>50</td></tr>
+  <tr><td>4</td><td>20</td><td>6</td><td>8</td><td>4</td><td>2</td><td>70</td></tr>
+  <tr><td>5</td><td>30</td><td>8</td><td>12</td><td>6</td><td>4</td><td>85</td></tr>
+  <tr><td>6</td><td>30</td><td>10</td><td>10</td><td>6</td><td>4</td><td>100</td></tr>
+</table>
+
+<h3>Engagement Simulation Flow</h3>
+<ol>
+  <li><strong>Send:</strong> AI-generated email sent via SMTP.</li>
+  <li><strong>Wait 30 min – 1.5 hrs:</strong> Simulates delivery time.</li>
+  <li><strong>Auto-Read (IMAP):</strong> Connects to recipient's inbox, finds the email, marks as <code>\Seen</code>.</li>
+  <li><strong>Wait 30 min – 3 hrs:</strong> Simulates human reading time.</li>
+  <li><strong>Auto-Reply (SMTP):</strong> Gemini generates a contextual reply and sends it back.</li>
+</ol>
+
+<div class="callout">
+  <strong>Crash Safety:</strong> Each email is enqueued as an individual persistent BullMQ job in Redis. If the server shuts down, remaining jobs resume automatically on restart.
+</div>
+
+<h3>Safety Mechanisms</h3>
+<ul>
+  <li><strong>Bounce Rate Auto-Pause:</strong> If bounce rate exceeds 5%, the inbox is automatically paused.</li>
+  <li><strong>Week Gating:</strong> Users must manually approve progression to each new week.</li>
+  <li><strong>Volume Jump Cap:</strong> Daily limit cannot increase by more than +5 per day to avoid sudden spikes.</li>
+  <li><strong>Weekend Throttling:</strong> Weekends are capped at 2 emails/day maximum.</li>
+  <li><strong>Friday Prayer Block:</strong> Emails are paused during GST Friday prayer hours (12–2 PM).</li>
+</ul>
+
+<div class="page-break"></div>
+
+<!-- 6. API -->
+<h2 id="api">6. API Reference</h2>
+<p>All API endpoints are prefixed with <code>/api</code> and require JWT authentication (except <code>/auth</code>).</p>
+
+<h3>Authentication</h3>
+<table>
+  <tr><th>Method</th><th>Endpoint</th><th>Description</th></tr>
+  <tr><td>POST</td><td><code>/api/auth/register</code></td><td>Create a new account</td></tr>
+  <tr><td>POST</td><td><code>/api/auth/login</code></td><td>Login and receive JWT</td></tr>
+</table>
+
+<h3>Domains & Inboxes</h3>
+<table>
+  <tr><th>Method</th><th>Endpoint</th><th>Description</th></tr>
+  <tr><td>GET</td><td><code>/api/domains</code></td><td>List all domains</td></tr>
+  <tr><td>POST</td><td><code>/api/domains</code></td><td>Add a new domain</td></tr>
+  <tr><td>GET</td><td><code>/api/inboxes</code></td><td>List all inboxes</td></tr>
+  <tr><td>POST</td><td><code>/api/inboxes</code></td><td>Create inbox (max 3/domain)</td></tr>
+  <tr><td>POST</td><td><code>/api/inboxes/:id/start-warmup</code></td><td>Start warmup process</td></tr>
+  <tr><td>POST</td><td><code>/api/inboxes/:id/pause-warmup</code></td><td>Pause warmup</td></tr>
+  <tr><td>POST</td><td><code>/api/inboxes/:id/approve-week</code></td><td>Approve next week</td></tr>
+</table>
+
+<h3>Campaigns</h3>
+<table>
+  <tr><th>Method</th><th>Endpoint</th><th>Description</th></tr>
+  <tr><td>GET</td><td><code>/api/campaigns</code></td><td>List all campaigns</td></tr>
+  <tr><td>POST</td><td><code>/api/campaigns</code></td><td>Create a campaign</td></tr>
+  <tr><td>POST</td><td><code>/api/campaigns/:id/start</code></td><td>Start sending</td></tr>
+</table>
+
+<h3>Other Endpoints</h3>
+<table>
+  <tr><th>Prefix</th><th>Description</th></tr>
+  <tr><td><code>/api/lists</code></td><td>Email list management (upload CSV/XLSX)</td></tr>
+  <tr><td><code>/api/leads</code></td><td>Lead pipeline management</td></tr>
+  <tr><td><code>/api/analytics</code></td><td>Campaign & warmup analytics</td></tr>
+  <tr><td><code>/api/templates</code></td><td>Email template CRUD</td></tr>
+  <tr><td><code>/api/seeds</code></td><td>External seed account management</td></tr>
+  <tr><td><code>/api/deliverability</code></td><td>Deliverability check results</td></tr>
+  <tr><td><code>/t</code></td><td>Open/click tracking pixel routes</td></tr>
+</table>
+
+<div class="page-break"></div>
+
+<!-- 7. WORKERS -->
+<h2 id="workers">7. Background Workers</h2>
+<p>Workers run as a separate process via <code>npm run dev:worker</code> (included in <code>npm run dev</code>).</p>
+<table>
+  <tr><th>Worker</th><th>Queue</th><th>Purpose</th></tr>
+  <tr><td>Warmup Worker</td><td><code>warmup-send</code></td><td>Generates daily email jobs & sends individual warmup emails</td></tr>
+  <tr><td>Auto-Read Worker</td><td><code>auto-read-warmup</code></td><td>Connects via IMAP, marks emails as read</td></tr>
+  <tr><td>Auto-Reply Worker</td><td><code>auto-reply-warmup</code></td><td>Generates and sends AI-powered replies</td></tr>
+  <tr><td>Campaign Scheduler</td><td><code>campaign-schedule</code></td><td>Processes campaign sequences on schedule</td></tr>
+  <tr><td>Email Send Worker</td><td><code>email-send</code></td><td>Sends individual campaign emails via SMTP</td></tr>
+  <tr><td>Bounce Processor</td><td><code>bounce-processor</code></td><td>Detects and records bounced emails</td></tr>
+  <tr><td>Reply Detector</td><td><code>reply-detector</code></td><td>Scans IMAP for campaign replies</td></tr>
+  <tr><td>Analytics Rollup</td><td><code>analytics-rollup</code></td><td>Aggregates daily statistics</td></tr>
+  <tr><td>Deliverability</td><td><code>deliverability</code></td><td>Runs weekly deliverability checks</td></tr>
+</table>
+
+<div class="page-break"></div>
+
+<!-- 8. AI -->
+<h2 id="ai">8. AI Integration (Google Gemini)</h2>
+<p>ColdStack uses Google Gemini to generate two types of content:</p>
+<h3>Warmup Email Generation</h3>
+<p>Gemini generates batches of 30 realistic B2B emails (subject + body) that are cached in Redis. These emails look like normal office communications — meeting follow-ups, quick questions, scheduling calls — not marketing templates.</p>
+
+<h3>Reply Generation</h3>
+<p>When the auto-reply worker fires, Gemini generates a short, contextual reply (1–3 sentences) based on the original email's subject line, mimicking a fast, casual business response.</p>
+
+<div class="callout">
+  <strong>Model Configuration:</strong> Set <code>GEMINI_MODEL</code> in your <code>.env</code> file to use any Gemini model (default: <code>gemini-2.5-flash</code>).
+</div>
+
+<!-- 9. SECURITY -->
+<h2 id="security">9. Security</h2>
+<ul>
+  <li><strong>Credential Encryption:</strong> All SMTP/IMAP passwords are encrypted at rest using AES-256.</li>
+  <li><strong>JWT Authentication:</strong> All API endpoints are protected with short-lived JWT tokens.</li>
+  <li><strong>Rate Limiting:</strong> 100 requests/minute per user via <code>express-rate-limit</code>.</li>
+  <li><strong>Helmet:</strong> HTTP security headers applied via <code>helmet</code>.</li>
+  <li><strong>Environment Isolation:</strong> <code>.env</code> is gitignored; only <code>.env.example</code> is committed.</li>
+</ul>
+
+<div class="page-break"></div>
+
+<!-- 10. ENV -->
+<h2 id="env">10. Environment Variables</h2>
+<table>
+  <tr><th>Variable</th><th>Description</th><th>Default</th></tr>
+  <tr><td><code>DATABASE_URL</code></td><td>PostgreSQL connection string</td><td>—</td></tr>
+  <tr><td><code>REDIS_URL</code></td><td>Redis connection string</td><td><code>redis://localhost:6379</code></td></tr>
+  <tr><td><code>JWT_SECRET</code></td><td>Secret for signing access tokens</td><td>—</td></tr>
+  <tr><td><code>JWT_REFRESH_SECRET</code></td><td>Secret for signing refresh tokens</td><td>—</td></tr>
+  <tr><td><code>ENCRYPTION_KEY</code></td><td>32-byte hex key for AES-256</td><td>—</td></tr>
+  <tr><td><code>FRONTEND_URL</code></td><td>Web app URL (CORS origin)</td><td><code>http://localhost:3000</code></td></tr>
+  <tr><td><code>API_URL</code></td><td>API server URL</td><td><code>http://localhost:4000</code></td></tr>
+  <tr><td><code>PORT</code></td><td>API server port</td><td><code>4000</code></td></tr>
+  <tr><td><code>GEMINI_API_KEY</code></td><td>Google Gemini API key</td><td>—</td></tr>
+  <tr><td><code>GEMINI_MODEL</code></td><td>Gemini model to use</td><td><code>gemini-2.5-flash</code></td></tr>
+</table>
+
+<!-- 11. ROADMAP -->
+<h2 id="roadmap">11. Roadmap</h2>
+<ul>
+  <li>✅ AI-Powered Warmup Engine</li>
+  <li>✅ Real-Time Deliverability Dashboard</li>
+  <li>✅ Crash-Safe BullMQ Architecture</li>
+  <li>✅ Campaign Management with Sequences</li>
+  <li>🔜 Spam Folder Rescue (IMAP move from Spam → Inbox)</li>
+  <li>🔜 Inbox Placement Rate Tracking</li>
+  <li>🔜 Proxy Support for IMAP/SMTP routing</li>
+  <li>🔜 Microsoft Exchange / OAuth Integration</li>
+  <li>🔜 Docker one-click deployment</li>
+  <li>🔜 Campaign Safety Guards (min warmup requirements)</li>
+</ul>
+
+<hr style="margin-top: 60px;">
+<p style="text-align: center; color: #888; font-size: 0.85rem; margin-top: 20px;">
+  ColdStack v1.0.0 — Open Source under MIT License<br>
+  github.com/muhammadaliqamar/coldstack
+</p>
+
+</body>
+</html>

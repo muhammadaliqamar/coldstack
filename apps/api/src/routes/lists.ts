@@ -7,6 +7,7 @@ import multer from 'multer';
 import { parse as csvParse } from 'csv-parse/sync';
 import * as XLSX from 'xlsx';
 import path from 'path';
+import { verifyEmail } from '../lib/verification';
 
 const router = Router();
 router.use(authenticate);
@@ -136,6 +137,58 @@ router.delete('/:id/contacts/:contactId', async (req: AuthRequest, res, next) =>
     await prisma.contact.delete({ where: { id: req.params.contactId } });
     res.json({ message: 'Contact deleted' });
   } catch (error) { next(error); }
+});
+
+/**
+ * POST /api/lists/:id/verify-all — Performs parallelized bulk verification for all contacts in a list
+ */
+router.post('/:id/verify-all', async (req: AuthRequest, res, next) => {
+  try {
+    const list = await prisma.emailList.findFirst({
+      where: { id: req.params.id, userId: req.userId! },
+    });
+
+    if (!list) {
+      return res.status(404).json({ error: 'List not found' });
+    }
+
+    const contacts = await prisma.contact.findMany({
+      where: { listId: list.id },
+    });
+
+    console.log(`[Lists] Starting bulk verification of ${contacts.length} contacts for list: ${list.name}`);
+
+    // Verify in concurrent batches of 10 to protect network sockets
+    const batchSize = 10;
+    let verifiedCount = 0;
+    let invalidCount = 0;
+
+    for (let i = 0; i < contacts.length; i += batchSize) {
+      const batch = contacts.slice(i, i + batchSize);
+      
+      await Promise.all(batch.map(async (contact) => {
+        try {
+          const status = await verifyEmail(contact.email);
+          await prisma.contact.update({
+            where: { id: contact.id },
+            data: { verificationStatus: status },
+          });
+          if (status === 'verified') verifiedCount++;
+          else invalidCount++;
+        } catch (e) {
+          console.error(`[Lists] Failed to verify contact ${contact.email}:`, e);
+        }
+      }));
+    }
+
+    res.json({
+      message: `Completed verification of ${contacts.length} contacts.`,
+      verifiedCount,
+      invalidCount,
+    });
+  } catch (error) {
+    next(error);
+  }
 });
 
 export default router;

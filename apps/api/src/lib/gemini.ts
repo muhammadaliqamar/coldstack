@@ -66,7 +66,7 @@ async function generateAndCacheWarmupPool(): Promise<void> {
 
   try {
     const response = await ai.models.generateContent({
-      model: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
+      model: process.env.GEMINI_MODEL || 'gemini-1.5-flash',
       contents: prompt,
     });
 
@@ -117,7 +117,7 @@ export async function getGeminiReply(subject: string): Promise<string> {
 
   try {
     const response = await ai.models.generateContent({
-      model: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
+      model: process.env.GEMINI_MODEL || 'gemini-1.5-flash',
       contents: prompt,
     });
     return response.text?.trim() || 'Sounds good to me!';

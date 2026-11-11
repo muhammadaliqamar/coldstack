@@ -13,7 +13,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
-import { Play, Pause, Flame, Settings, Activity, CheckCircle, Globe, Trash2, Send, Mail } from 'lucide-react';
+import { Play, Pause, Flame, Settings, Activity, CheckCircle, Globe, Trash2, Send, Mail, Square } from 'lucide-react';
 import Link from 'next/link';
 
 export default function InboxesPage() {
@@ -59,7 +59,7 @@ export default function InboxesPage() {
   const domainNames = Object.keys(groupedInboxes);
 
   const toggleWarmupMutation = useMutation({
-    mutationFn: ({ id, action }: { id: string, action: 'start' | 'pause' }) => 
+    mutationFn: ({ id, action }: { id: string, action: 'start' | 'pause' | 'resume' | 'stop' }) => 
       fetchApi(`/inboxes/${id}/${action}-warmup`, { method: 'POST' }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['inboxes'] });
@@ -313,14 +313,23 @@ export default function InboxesPage() {
                           Approve Week {inbox.warmupWeek + 1} to Continue
                         </Button>
                       )}
-                      <div className="flex flex-wrap gap-3 w-full">
+                      <div className="flex flex-wrap gap-2 w-full">
                       {inbox.warmupStatus === 'warming' ? (
                         <Button variant="secondary" className="flex-1 font-semibold border-amber-200/20 bg-amber-500/10 text-amber-600 hover:bg-amber-500/20 hover:text-amber-700 dark:text-amber-400 dark:hover:text-amber-300" onClick={() => toggleWarmupMutation.mutate({ id: inbox.id, action: 'pause' })}>
-                          <Pause className="w-4 h-4 mr-2" /> Pause Warmup
+                          <Pause className="w-4 h-4 mr-2" /> Pause
                         </Button>
                       ) : (
-                        <Button variant="default" className="flex-1 font-semibold shadow-sm" onClick={() => toggleWarmupMutation.mutate({ id: inbox.id, action: 'start' })}>
-                          <Flame className="w-4 h-4 mr-2 text-amber-300" /> Start Warmup
+                        <Button variant="default" className="flex-1 font-semibold shadow-sm" onClick={() => toggleWarmupMutation.mutate({ id: inbox.id, action: inbox.warmupWeek > 0 ? 'resume' : 'start' })}>
+                          <Flame className="w-4 h-4 mr-2 text-amber-300" /> {inbox.warmupWeek > 0 ? 'Resume' : 'Start'}
+                        </Button>
+                      )}
+                      {(inbox.warmupStatus === 'warming' || inbox.warmupStatus === 'paused') && (
+                        <Button variant="outline" size="icon" className="shrink-0 text-red-500 hover:bg-red-50 hover:text-red-600 border-red-200 transition-colors" onClick={() => {
+                          if (window.confirm('Are you sure you want to stop and reset warmup progress?')) {
+                            toggleWarmupMutation.mutate({ id: inbox.id, action: 'stop' });
+                          }
+                        }} title="Stop Warmup">
+                          <Square className="w-4 h-4" />
                         </Button>
                       )}
                       <Link href={`/inboxes/${inbox.id}`} className={cn(buttonVariants({ variant: "outline", size: "icon" }), "shrink-0 hover:bg-primary hover:text-primary-foreground transition-colors")} title="View Incoming Emails">

@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { prisma } from '@coldstack/db';
+import { assessLeadEngagement } from '../lib/engagement';
 
 const router = Router();
 
@@ -28,6 +29,9 @@ router.get('/open/:emailLogId', async (req, res) => {
           data: { stage: 'opened' },
         });
       }
+
+      // Re-assess and score engagement!
+      await assessLeadEngagement(emailLog.leadId);
     }
   } catch (err) {
     console.error('Tracking pixel error:', err);
@@ -66,6 +70,9 @@ router.get('/click/:emailLogId', async (req, res) => {
           data: { stage: 'clicked' },
         });
       }
+
+      // Re-assess and score engagement!
+      await assessLeadEngagement(emailLog.leadId);
     }
   } catch (err) {
     console.error('Click tracking error:', err);

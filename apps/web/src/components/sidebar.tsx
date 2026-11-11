@@ -17,13 +17,19 @@ import {
   Sun,
   Moon,
   Flame,
+  Search,
+  Target,
+  Sparkles,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useUIStore } from '@/lib/store';
 
 const navItems = [
   { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
+  { name: 'Lead Finder', href: '/lead-finder', icon: Search },
   { name: 'Campaigns', href: '/campaigns', icon: Megaphone },
+  { name: 'Nurturing Funnel', href: '/nurturing', icon: Target },
+  { name: 'AI Deal Closer', href: '/closer', icon: Sparkles },
   { name: 'Pipeline', href: '/pipeline', icon: KanbanSquare },
   { name: 'Inboxes', href: '/inboxes', icon: Inbox },
   { name: 'Domains', href: '/domains', icon: Globe },

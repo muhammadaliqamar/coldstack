@@ -1,3 +1,7 @@
+import * as dotenv from 'dotenv';
+import path from 'path';
+dotenv.config({ path: path.resolve(__dirname, '../../../../.env') });
+
 import { warmupWorker } from './warmup.worker';
 import { campaignScheduleWorker } from './campaign-schedule.worker';
 import { emailSendWorker } from './email-send.worker';
@@ -58,7 +62,51 @@ async function scheduleRecurringJobs() {
     });
   }
 
-  console.log(`📅 Scheduled recurring jobs (${activeInboxes.length} inbox reply checks)`);
+  // ── Restore warmup jobs safely (prevent duplicate sends on restart) ──
+  const warmingInboxes = await prisma.inbox.findMany({
+    where: { warmupStatus: 'warming' },
+    select: { id: true, dailySendLimit: true },
+  });
+
+  // Drain any stale pending individual warmup-email-send jobs from the queue
+  // These are leftover from the previous process and would cause duplicate sends
+  const { warmupQueue: wq } = await import('@coldstack/queue');
+  const waitingJobs = await wq.getWaiting();
+  const delayedJobs = await wq.getDelayed();
+  const staleJobs = [...waitingJobs, ...delayedJobs].filter(
+    j => j.name === 'warmup-email-send'
+  );
+  if (staleJobs.length > 0) {
+    for (const job of staleJobs) {
+      try { await job.remove(); } catch (e) { /* already processing */ }
+    }
+    console.log(`🧹 Removed ${staleJobs.length} stale warmup-email-send jobs from previous session`);
+  }
+
+  // Re-add repeatable daily schedule and conditionally trigger immediate run
+  const todayStart = new Date();
+  todayStart.setUTCHours(0, 0, 0, 0);
+
+  for (const inbox of warmingInboxes) {
+    // Always re-add the daily repeatable schedule
+    await wq.add(`warmup-${inbox.id}`, { inboxId: inbox.id }, {
+      repeat: { pattern: '0 9 * * *' },
+    });
+
+    // Only trigger an immediate run if today's limit hasn't been met
+    const todaySentCount = await prisma.warmupLog.count({
+      where: { inboxId: inbox.id, date: { gte: todayStart } },
+    });
+
+    if (todaySentCount < (inbox.dailySendLimit || 2)) {
+      await wq.add(`warmup-${inbox.id}-immediate`, { inboxId: inbox.id });
+      console.log(`  ↳ Inbox ${inbox.id}: ${todaySentCount}/${inbox.dailySendLimit} sent today — triggering catch-up`);
+    } else {
+      console.log(`  ↳ Inbox ${inbox.id}: ${todaySentCount}/${inbox.dailySendLimit} sent today — skipping (limit reached)`);
+    }
+  }
+
+  console.log(`📅 Scheduled recurring jobs (${activeInboxes.length} inbox reply checks, ${warmingInboxes.length} warmup queues restored safely)`);
 }
 
 scheduleRecurringJobs().catch(console.error);
